@@ -1,6 +1,15 @@
-import { useState } from 'react'
-import { motion } from 'framer-motion'
-import { Send, Phone, MessageSquare, MapPin, CheckCircle2, LoaderCircle } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import {
+  Send,
+  Phone,
+  MessageSquare,
+  MapPin,
+  CheckCircle2,
+  LoaderCircle,
+  ChevronDown,
+  Check,
+} from 'lucide-react'
 import { BUSINESS, isQuoteEmailConfigured } from '../config'
 
 const fadeUp = {
@@ -20,21 +29,104 @@ const services = [
 const inputCls =
   'w-full rounded-xl border border-night-600/70 bg-night-900/80 px-4 py-3 text-white placeholder-steel-400/60 outline-none transition-colors focus:border-ls-blue-400 focus:ring-2 focus:ring-ls-blue-500/20'
 
-// native selects add their own indent — strip it and draw our own chevron
-const selectCls = `${inputCls} appearance-none pr-10 bg-no-repeat`
-const selectStyle = {
-  backgroundImage:
-    "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236f81a3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\")",
-  backgroundPosition: 'right 0.9rem center',
+// Custom dropdown instead of a native <select>: mobile browsers anchor the
+// native popup unpredictably, and this one renders right under its field.
+function FieldSelect({ label, name, placeholder, options, value, onChange, error }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+
+  useEffect(() => {
+    const onDoc = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false)
+    }
+    const onKey = (e) => e.key === 'Escape' && setOpen(false)
+    document.addEventListener('pointerdown', onDoc)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('pointerdown', onDoc)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [])
+
+  return (
+    <div ref={ref} className="relative">
+      <label className="mb-1.5 block text-sm font-medium text-steel-300">{label}</label>
+      <input type="hidden" name={name} value={value} />
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className={`${inputCls} flex items-center justify-between gap-2 text-left ${
+          error ? 'border-red-500/60' : ''
+        }`}
+      >
+        <span className={value ? 'text-white' : 'text-steel-400/60'}>
+          {value || placeholder}
+        </span>
+        <ChevronDown
+          className={`h-4 w-4 shrink-0 text-steel-400 transition-transform ${
+            open ? 'rotate-180' : ''
+          }`}
+        />
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.ul
+            role="listbox"
+            initial={{ opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.15, ease: 'easeOut' }}
+            className="absolute inset-x-0 top-full z-30 mt-2 max-h-64 overflow-auto rounded-xl border border-night-600 bg-night-900 py-1.5 shadow-xl shadow-black/60"
+          >
+            {options.map((opt) => (
+              <li key={opt}>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={opt === value}
+                  onClick={() => {
+                    onChange(opt)
+                    setOpen(false)
+                  }}
+                  className={`flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left text-sm transition-colors hover:bg-ls-blue-500/10 ${
+                    opt === value ? 'text-ls-blue-300' : 'text-steel-300'
+                  }`}
+                >
+                  {opt}
+                  {opt === value && <Check className="h-4 w-4 shrink-0" />}
+                </button>
+              </li>
+            ))}
+          </motion.ul>
+        )}
+      </AnimatePresence>
+
+      {error && <p className="mt-1.5 text-xs text-red-300">Please choose an option.</p>}
+    </div>
+  )
 }
 
 export default function Quote() {
   const [status, setStatus] = useState('idle') // idle | sending | sent | error
+  const [vehicleType, setVehicleType] = useState('')
+  const [service, setService] = useState('')
+  const [fieldErrors, setFieldErrors] = useState({})
 
   async function handleSubmit(e) {
     e.preventDefault()
     const form = e.target
     const data = Object.fromEntries(new FormData(form))
+
+    // hidden inputs skip native validation — check the dropdowns ourselves
+    const errors = {
+      vehicleType: !data.vehicleType,
+      service: !data.service,
+    }
+    setFieldErrors(errors)
+    if (errors.vehicleType || errors.service) return
 
     const summary =
       `New quote request — LS Detailing\n` +
@@ -64,6 +156,8 @@ export default function Quote() {
       if (!res.ok) throw new Error('send failed')
       setStatus('sent')
       form.reset()
+      setVehicleType('')
+      setService('')
     } catch {
       setStatus('error')
     }
@@ -240,31 +334,30 @@ export default function Quote() {
                 </div>
 
                 <div className="grid gap-5 sm:grid-cols-2">
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-steel-300">
-                      Vehicle Type *
-                    </label>
-                    <select name="vehicleType" required className={selectCls} style={selectStyle} defaultValue="">
-                      <option value="" disabled>
-                        Select type…
-                      </option>
-                      <option>Sedan</option>
-                      <option>SUV / Truck / Van</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-steel-300">
-                      Service *
-                    </label>
-                    <select name="service" required className={selectCls} style={selectStyle} defaultValue="">
-                      <option value="" disabled>
-                        Select service…
-                      </option>
-                      {services.map((s) => (
-                        <option key={s}>{s}</option>
-                      ))}
-                    </select>
-                  </div>
+                  <FieldSelect
+                    label="Vehicle Type *"
+                    name="vehicleType"
+                    placeholder="Select type…"
+                    options={['Sedan', 'SUV / Truck / Van']}
+                    value={vehicleType}
+                    onChange={(v) => {
+                      setVehicleType(v)
+                      setFieldErrors((f) => ({ ...f, vehicleType: false }))
+                    }}
+                    error={fieldErrors.vehicleType}
+                  />
+                  <FieldSelect
+                    label="Service *"
+                    name="service"
+                    placeholder="Select service…"
+                    options={services}
+                    value={service}
+                    onChange={(v) => {
+                      setService(v)
+                      setFieldErrors((f) => ({ ...f, service: false }))
+                    }}
+                    error={fieldErrors.service}
+                  />
                 </div>
 
                 <div>
